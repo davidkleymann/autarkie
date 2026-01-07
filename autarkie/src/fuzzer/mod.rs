@@ -44,7 +44,7 @@ where
     let shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
     #[cfg(any(feature = "afl", feature = "llvm-fuzzer-no-link"))]
     let opt = Opt::parse();
-    #[cfg(any(feature = "llvm-fuzzer-no-link"))]
+    #[cfg(feature = "llvm-fuzzer-no-link")]
     {
         if let Some(run_path) = opt.run {
             run_file_libfuzzer(run_path);
@@ -55,8 +55,24 @@ where
     let opt = {
         let mut opt = std::env::args().collect::<Vec<_>>();
         opt.remove(1);
-        opt.remove(opt.len() - 1);
-        Opt::parse_from(opt)
+        let last = opt.remove(opt.len() - 1);
+        let parsed = Opt::parse_from(opt);
+        if last.len() > 0 {
+            let fp = Path::new(&last);
+            if let Some(filename) = fp.file_name() {
+                let cur_exe = std::env::current_exe();
+                if let Some(exe_name) =
+                    cur_exe.map_or(None, |e| e.file_name().map(|n| n.to_owned()))
+                {
+                    if exe_name != filename {
+                        eprintln!("last: {:?}", last);
+                        run_file_libfuzzer(PathBuf::from(last));
+                        return;
+                    }
+                }
+            }
+        }
+        parsed
     };
 
     #[cfg(not(feature = "fuzzbench"))]
@@ -232,7 +248,7 @@ fn create_monitor_closure() -> impl Fn(&str) + Clone {
 /// Communicate the stderr duplicated fd to subprocesses
 pub const STDERR_FD_VAR: &str = "_LIBAFL_LIBFUZZER_STDERR_FD";
 
-#[cfg(feature = "llvm-fuzzer-no-link")]
+#[cfg(any(feature = "llvm-fuzzer-no-link", feature = "libfuzzer"))]
 fn run_file_libfuzzer(input: PathBuf) {
     let files = if input.is_dir() {
         input
